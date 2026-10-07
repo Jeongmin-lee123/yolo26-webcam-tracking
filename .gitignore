@@ -5,3 +5,6 @@ __pycache__/
 runs/
 # MediaPipe 모델 (README의 링크에서 다운로드)
 *.task
+# 커스텀 제스처: 수집 데이터와 학습 결과(웹용은 docs/custom_gesture_model.json 으로 변환해 올림)
+data/
+*.joblib

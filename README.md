@@ -1,5 +1,7 @@
 # YOLO26 Webcam Segmentation + Tracking
 
+> 🌐 **웹 데모 (MediaPipe 손·제스처·얼굴·커스텀 제스처)**: https://jeongmin-lee123.github.io/yolo26-webcam-tracking/
+
 [Ultralytics YOLO26](https://docs.ultralytics.com/) 모델로 웹캠 영상에서 실시간 instance segmentation과 object tracking을 수행합니다.
 
 ## 기능
@@ -322,3 +324,122 @@ BaseOptions(model_asset_buffer=MODEL_PATH.read_bytes())
 - 엄지–검지 거리로 **핀치** 감지 → 볼륨/밝기 조절
 - 제스처로 동작 실행 (👍 캡처 저장, ✊ 종료 등)
 - Model Maker로 커스텀 제스처 학습
+
+---
+
+# 강의노트 — 얼굴 랜드마크, 커스텀 제스처 학습, 웹 배포 (2026-10-07)
+
+> 오늘 한 일 (3부): **Face Landmarker**로 얼굴 478점 + 표정 → **나만의 제스처 수집·학습·추론** → **GitHub Pages로 웹 배포**
+
+## 1. Face Landmarker — 얼굴 478점 + 표정 (`webcam_face.py`)
+
+모델: [`face_landmarker.task`](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task) (3.7MB) · [문서](https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker)
+
+```python
+options = vision.FaceLandmarkerOptions(
+    base_options=mp_python.BaseOptions(model_asset_buffer=MODEL_PATH.read_bytes()),
+    running_mode=vision.RunningMode.VIDEO,
+    num_faces=1,
+    output_face_blendshapes=True,   # 표정 점수 52종
+)
+result = landmarker.detect_for_video(mp_image, timestamp_ms)
+result.face_landmarks[i]            # 478개 점 (468 얼굴 + 10 홍채)
+result.face_blendshapes[i]          # [Category(category_name="jawOpen", score=0.8), ...]
+```
+
+- **Blendshape**: 표정을 52개 점수(0~1)로 표현. 예: `eyeBlinkLeft`, `jawOpen`, `mouthSmileLeft`
+- 점수에 임계값만 걸면 상태 판정 가능 → 눈 감음(`eyeBlink* > 0.5`), 입 벌림(`jawOpen > 0.3`), 미소(`mouthSmile* > 0.5`)
+- 연결선 목록은 `vision.FaceLandmarksConnections`에 들어 있음 (`FACE_LANDMARKS_LIPS`, `..._LEFT_EYE`, `..._TESSELATION` 등)
+
+| 키 | 기능 |
+|---|---|
+| `m` | 얼굴 메시(삼각망) on/off |
+| `b` | 표정 점수 패널 on/off |
+
+## 2. 커스텀 제스처 — 수집 → 학습 → 추론
+
+### 2-1. 왜 Model Maker 대신 직접 만들었나
+- MediaPipe 공식 커스텀 제스처 도구(`mediapipe-model-maker`)는 **TensorFlow + Python 3.11 이하** 필요 → 현재 Python 3.14에서 설치 불가
+- 대신 **Hand Landmarker의 21개 점을 특징으로 쓰고 scikit-learn으로 분류기 학습** → 가볍고 CPU로 몇 초면 학습
+
+```
+웹캠 → Hand Landmarker → 21점(x,y,z) → 정규화(63차원) → MLP 분류기 → 제스처
+```
+
+### 2-2. 특징 정규화 (`gesture_common.py`) — 핵심 아이디어
+같은 손 모양이면 **위치·크기·좌우와 상관없이 같은 숫자**가 나오도록 변환:
+1. x에 (가로/세로) 곱하기 → 화면 비율 때문에 손 모양이 찌그러지지 않게
+2. 손목(0번)을 원점으로 → 화면 어디에 있든 동일
+3. 손목~가장 먼 점 거리로 나누기 → 카메라와의 거리와 무관
+4. 왼손이면 x 뒤집기 → 오른손으로만 모아도 왼손 인식
+
+### 2-3. 사용 방법
+```bash
+pip install -U scikit-learn pillow
+
+# ① 수집: 라벨마다 실행, SPACE로 녹화 시작/정지, 300개 모이면 자동 종료
+python collect_gesture.py --label none           # 아무 동작 아닌 손 (오인식 방지용, 꼭 넣기)
+python collect_gesture.py --label korean_heart
+python collect_gesture.py --label ok
+
+# ② 학습: 20%로 검증 → 전체로 재학습 → custom_gesture_model.joblib 저장
+python train_gesture.py
+
+# ③ 실시간 추론 (인식되면 이모지 표시)
+python webcam_custom_gesture.py
+
+# ④ (웹 데모 갱신) 학습 모델을 JSON으로 변환
+python export_web_model.py
+```
+
+| 파일 | 역할 |
+|---|---|
+| `collect_gesture.py` | 웹캠 → 정규화된 랜드마크를 `data/custom_gestures.csv`에 누적 저장 |
+| `train_gesture.py` | `StandardScaler` + `MLPClassifier(64, 32)` 학습, 검증 리포트·혼동 행렬 출력 |
+| `webcam_custom_gesture.py` | 실시간 추론, 확률 0.7 미만은 `?`, 최근 5프레임 다수결로 흔들림 감소, 이모지 표시 |
+| `export_web_model.py` | 학습된 가중치를 `docs/custom_gesture_model.json`으로 변환 |
+
+### 2-4. 오늘 학습 결과
+| 라벨 | 샘플 | 검증 정확도 |
+|---|---|---|
+| `none` | 300 | 전체 **98.3%** |
+| `korean_heart` ❤️ | 300 | (검증 180개 중 177개 정답) |
+| `ok` 👌 | 300 | |
+
+- 같은 녹화에서 나눈 검증이라 실제 사용 정확도는 이보다 낮을 수 있음 → 각도·거리를 다양하게 더 모으면 좋아짐
+- `ok`와 `korean_heart`는 둘 다 엄지·검지를 맞대는 모양이라 헷갈리기 쉬움
+
+### 2-5. OpenCV 화면에 이모지 그리기
+- `cv2.putText`는 이모지/한글을 못 그림 → **Pillow**로 Windows 컬러 이모지 폰트(`seguiemj.ttf`)를 이용해 RGBA 이미지로 만든 뒤 **알파 합성**
+```python
+font = ImageFont.truetype("C:/Windows/Fonts/seguiemj.ttf", 96)
+ImageDraw.Draw(img).text((0, 0), "👌", font=font, embedded_color=True)  # embedded_color=True가 컬러 이모지
+```
+- 새 라벨의 이모지는 `webcam_custom_gesture.py`의 `EMOJI` 딕셔너리에 추가
+
+## 3. GitHub Pages로 웹 배포 (`docs/`)
+
+파이썬은 GitHub Pages에서 실행할 수 없으므로 **MediaPipe JavaScript 버전**(`@mediapipe/tasks-vision`)으로 같은 기능을 웹에 옮김.
+
+| 파일 | 역할 |
+|---|---|
+| `docs/index.html`, `style.css` | 페이지 (탭: 손 / 제스처 / 얼굴 / 커스텀 제스처) |
+| `docs/app.js` | 웹캠 → MediaPipe 추론 → 캔버스 그리기 |
+| `docs/custom_gesture_model.json` | 파이썬에서 학습한 MLP 가중치 (브라우저에서 직접 계산) |
+
+- 영상은 **브라우저 안에서만 처리**(WebAssembly + GPU), 서버로 전송되지 않음
+- 모델(`.task`)은 Google 저장소 URL에서 바로 불러옴 → 저장소에 모델 파일 불필요
+- 파이썬과 같은 결과를 내도록 **좌우 반전 후 추론**, 정규화·MLP 계산도 동일하게 구현 (파이썬과 확률 일치 확인)
+- 배포 설정: GitHub 저장소 → Settings → Pages → `main` 브랜치 `/docs` 폴더
+- 웹캠은 **HTTPS**에서만 동작 → GitHub Pages는 기본 HTTPS라 OK
+
+```bash
+gh api repos/<사용자>/<저장소>/pages -X POST -f "source[branch]=main" -f "source[path]=/docs"
+```
+
+## 4. 오늘의 정리 (3부)
+1. Face Landmarker는 **478점 + 표정 52종(blendshape)** → 임계값으로 눈 깜빡임·입 벌림·미소 판정
+2. 커스텀 제스처 = **랜드마크 정규화 + 작은 분류기**로 충분 (수집 → 학습 → 추론)
+3. `none` 클래스를 넣어야 아무 손이나 억지로 분류하지 않음
+4. OpenCV에 이모지는 Pillow로 그려서 합성
+5. 파이썬 모델도 가중치를 JSON으로 내보내면 **웹에서 그대로** 쓸 수 있음 → GitHub Pages로 배포

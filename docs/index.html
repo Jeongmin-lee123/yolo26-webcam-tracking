@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MediaPipe 웹캠 데모</title>
+  <meta name="description" content="MediaPipe로 손 랜드마크, 제스처 인식, 얼굴 랜드마크, 커스텀 제스처를 브라우저에서 실시간으로 실행합니다.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>MediaPipe 웹캠 데모</h1>
+    <p class="sub">브라우저에서 바로 실행됩니다. 영상은 서버로 전송되지 않고 내 컴퓨터에서만 처리됩니다.</p>
+  </header>
+
+  <main>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-mode="hand" aria-selected="true">✋ 손 랜드마크</button>
+      <button role="tab" data-mode="gesture">👍 제스처 인식</button>
+      <button role="tab" data-mode="face">🙂 얼굴 랜드마크</button>
+      <button role="tab" data-mode="custom">❤️ 커스텀 제스처</button>
+    </nav>
+
+    <section class="stage">
+      <div class="viewer">
+        <canvas id="canvas" width="640" height="480"></canvas>
+        <div id="overlay" class="overlay">
+          <button id="start" class="primary">카메라 시작</button>
+          <p class="hint">카메라 권한을 허용해 주세요</p>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div class="status"><span id="status">대기 중</span><span id="fps"></span></div>
+        <div id="info"></div>
+        <div id="controls"></div>
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <a href="https://github.com/Jeongmin-lee123/yolo26-webcam-tracking">GitHub 저장소</a> ·
+    <a href="https://ai.google.dev/edge/mediapipe/solutions/guide">MediaPipe</a>
+  </footer>
+
+  <video id="video" playsinline muted hidden></video>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
