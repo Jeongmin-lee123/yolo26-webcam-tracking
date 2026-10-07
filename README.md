@@ -1,35 +1,88 @@
-# YOLO26 Webcam Segmentation + Tracking
+# 웹캠 실시간 비전 실습 — YOLO26 + MediaPipe
 
 > 🌐 **웹 데모 (MediaPipe 손·제스처·얼굴·커스텀 제스처)**: https://jeongmin-lee123.github.io/yolo26-webcam-tracking/
 
-[Ultralytics YOLO26](https://docs.ultralytics.com/) 모델로 웹캠 영상에서 실시간 instance segmentation과 object tracking을 수행합니다.
+웹캠 하나로 **객체 탐지·분할·추적(YOLO26)** 부터 **손·제스처·얼굴 인식(MediaPipe)**, **나만의 제스처 학습**, **웹 배포**까지 해 본 실습 저장소입니다. (청년 피지컬 AI, 2026-10-07)
 
-## 기능
-- **Segmentation**: `yolo26n-seg.pt` 모델로 객체 마스크 표시
-- **Tracking**: ByteTrack(기본) / BoT-SORT로 프레임 간 객체 ID 유지
-- **이동 궤적**: 각 객체 중심의 최근 이동 경로 표시
-- FPS, 현재 추적 수, 누적 ID 수 화면 표시
+## 오늘 한 일 한눈에 보기
+
+| 순서 | 한 일 | 결과물 | 강의노트 |
+|---|---|---|---|
+| 1 | YOLO26 객체 탐지 → Segmentation + Tracking | `webcam_detect.py` | [1부](#강의노트--yolo26으로-웹캠-실시간-비전-만들기-2026-10-07) |
+| 2 | GitHub 저장소 만들고 올리기 | 이 저장소 | [1부 4장](#4-3단계--github에-올리기) |
+| 3 | MediaPipe 손 랜드마크 (21점) | `webcam_hand.py` | [2부](#강의노트--mediapipe로-손-랜드마크--제스처-인식-2026-10-07) |
+| 4 | MediaPipe 기본 제스처 인식 (7종) | `webcam_gesture.py` | [2부 5장](#5-gesture-recognizer--손-제스처-webcam_gesturepy) |
+| 5 | MediaPipe 얼굴 랜드마크 (478점 + 표정) | `webcam_face.py` | [3부 1장](#1-face-landmarker--얼굴-478점--표정-webcam_facepy) |
+| 6 | 커스텀 제스처 수집·학습·추론 (❤️ `korean_heart`, 👌 `ok`) | `collect_gesture.py` 외 | [3부 2장](#2-커스텀-제스처--수집--학습--추론) |
+| 7 | 웹 데모로 옮겨 GitHub Pages 배포 | `docs/` | [3부 3장](#3-github-pages로-웹-배포-docs) |
+
+### 오늘 만난 문제와 해결
+| 문제 | 원인 | 해결 |
+|---|---|---|
+| `WinError 1114 ... c10.dll` | Visual C++ 재배포 패키지가 오래됨 | 최신 [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe) 설치 |
+| `Unable to open file ... .task` | MediaPipe가 **한글 경로**를 못 엶 | `model_asset_buffer=파일.read_bytes()`로 전달 |
+| 커스텀 제스처 Model Maker 설치 불가 | TensorFlow가 Python 3.14 미지원 | 랜드마크 + scikit-learn MLP로 직접 구현 |
+| OpenCV 화면에 이모지가 안 나옴 | `cv2.putText`는 이모지 미지원 | Pillow + `seguiemj.ttf`로 그려서 알파 합성 |
+| 파이썬은 GitHub Pages에서 실행 불가 | Pages는 정적 웹 호스팅 | MediaPipe JS로 이식, MLP 가중치는 JSON으로 내보내기 |
+| Chrome 다운로드가 저장 창에서 멈춤 | "다운로드 전 저장 위치 확인" 설정 | 저장 창에서 직접 **저장** 클릭 |
+
+## 파일 구성
+
+| 파일 | 설명 |
+|---|---|
+| `webcam_detect.py` | YOLO26 Segmentation + Tracking + 이동 궤적 |
+| `webcam_hand.py` | MediaPipe 손 랜드마크 21점 |
+| `webcam_gesture.py` | MediaPipe 기본 제스처 7종 인식 |
+| `webcam_face.py` | MediaPipe 얼굴 478점 + 표정(blendshape) |
+| `gesture_common.py` | 커스텀 제스처 공통 함수 (손 검출, 특징 정규화, 그리기) |
+| `collect_gesture.py` | 커스텀 제스처 데이터 수집 → `data/custom_gestures.csv` |
+| `train_gesture.py` | 커스텀 제스처 분류기 학습 → `custom_gesture_model.joblib` |
+| `webcam_custom_gesture.py` | 커스텀 제스처 실시간 추론 + 이모지 표시 |
+| `export_web_model.py` | 학습 모델 → `docs/custom_gesture_model.json` (웹용) |
+| `docs/` | GitHub Pages 웹 데모 (HTML/CSS/JS) |
 
 ## 설치
+
 ```bash
-pip install -U ultralytics opencv-python lap
+pip install -U ultralytics opencv-python lap          # YOLO26
+pip install -U mediapipe scikit-learn pillow          # MediaPipe + 커스텀 제스처
 ```
+
+MediaPipe 모델(`.task`)은 자동 다운로드되지 않으므로 아래 링크에서 받아 `.py`와 같은 폴더에 둡니다. (YOLO `.pt`는 첫 실행 시 자동 다운로드)
+
+| 모델 | 사용 파일 |
+|---|---|
+| [`hand_landmarker.task`](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task) | `webcam_hand.py`, 커스텀 제스처 |
+| [`gesture_recognizer.task`](https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task) | `webcam_gesture.py` |
+| [`face_landmarker.task`](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task) | `webcam_face.py` |
 
 ## 실행
+
 ```bash
-python webcam_detect.py
+python webcam_detect.py            # YOLO26 분할 + 추적
+python webcam_hand.py              # 손 랜드마크
+python webcam_gesture.py           # 기본 제스처
+python webcam_face.py              # 얼굴 랜드마크 + 표정
+
+# 커스텀 제스처: 수집 → 학습 → 추론 (→ 웹 반영)
+python collect_gesture.py --label none
+python collect_gesture.py --label korean_heart
+python collect_gesture.py --label ok
+python train_gesture.py
+python webcam_custom_gesture.py
+python export_web_model.py
 ```
-모델 가중치는 처음 실행 시 자동으로 다운로드됩니다.
 
 ## 단축키
-| 키 | 기능 |
-|---|---|
-| `m` | 마스크 표시 on/off |
-| `t` | 궤적 표시 on/off |
-| `q` / `ESC` | 종료 |
 
-## 설정
-`webcam_detect.py` 상단 상수로 조정합니다.
+| 파일 | 키 | 기능 |
+|---|---|---|
+| 공통 | `q` / `ESC` | 종료 |
+| `webcam_detect.py` | `m` / `t` | 마스크 / 궤적 표시 on/off |
+| `webcam_face.py` | `m` / `b` | 얼굴 메시 / 표정 패널 on/off |
+| `collect_gesture.py` | `SPACE` | 녹화 시작/일시정지 |
+
+## YOLO26 설정 (`webcam_detect.py` 상단 상수)
 
 | 상수 | 설명 | 기본값 |
 |---|---|---|
@@ -38,9 +91,6 @@ python webcam_detect.py
 | `CAMERA_INDEX` | 웹캠 번호 | `0` |
 | `CONF_THRESHOLD` | 신뢰도 임계값 | `0.5` |
 | `TRAIL_LENGTH` | 궤적 길이(프레임) | `30` |
-
-## 문제 해결
-- Windows에서 `OSError: [WinError 1114] ... c10.dll` 오류가 나면 최신 [Visual C++ 재배포 패키지](https://aka.ms/vs/17/release/vc_redist.x64.exe)를 설치하세요.
 
 ---
 
