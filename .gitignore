@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 runs/
+# MediaPipe 모델 (README의 링크에서 다운로드)
+*.task
